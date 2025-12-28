@@ -19,12 +19,12 @@ MAX_PATH_LEN = 40
 MAX_PROGRESS_CHARS = 300
 
 
-def _one_line(text: str) -> str:
+def one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _truncate(text: str, max_len: int) -> str:
-    text = _one_line(text)
+def truncate(text: str, max_len: int) -> str:
+    text = one_line(text)
     if len(text) <= max_len:
         return text
     if max_len <= len(ELLIPSIS):
@@ -32,11 +32,11 @@ def _truncate(text: str, max_len: int) -> str:
     return text[: max_len - len(ELLIPSIS)] + ELLIPSIS
 
 
-def _inline_code(text: str) -> str:
+def inline_code(text: str) -> str:
     return f"`{text}`"
 
 
-def _format_elapsed(elapsed_s: float) -> str:
+def format_elapsed(elapsed_s: float) -> str:
     total = max(0, int(elapsed_s))
     minutes, seconds = divmod(total, 60)
     hours, minutes = divmod(minutes, 60)
@@ -47,56 +47,56 @@ def _format_elapsed(elapsed_s: float) -> str:
     return f"{seconds}s"
 
 
-def _format_header(elapsed_s: float, turn: Optional[int], label: str) -> str:
-    elapsed = _format_elapsed(elapsed_s)
+def format_header(elapsed_s: float, turn: Optional[int], label: str) -> str:
+    elapsed = format_elapsed(elapsed_s)
     if turn is not None:
         return f"{label}{HEADER_SEP}{elapsed}{HEADER_SEP}turn {turn}"
     return f"{label}{HEADER_SEP}{elapsed}"
 
 
-def _format_reasoning(text: str) -> str:
+def format_reasoning(text: str) -> str:
     if not text:
         return ""
-    return f"_{_truncate(text, MAX_REASON_LEN)}_"
+    return f"_{truncate(text, MAX_REASON_LEN)}_"
 
 
-def _format_command(command: str) -> str:
-    command = _truncate(command, MAX_CMD_LEN)
+def format_command(command: str) -> str:
+    command = truncate(command, MAX_CMD_LEN)
     if not command:
         command = "(empty)"
-    return _inline_code(command)
+    return inline_code(command)
 
 
-def _format_query(query: str) -> str:
-    return _truncate(query, MAX_QUERY_LEN)
+def format_query(query: str) -> str:
+    return truncate(query, MAX_QUERY_LEN)
 
 
-def _format_paths(paths: list[str]) -> str:
+def format_paths(paths: list[str]) -> str:
     rendered = []
     for path in paths:
-        rendered.append(_inline_code(_truncate(path, MAX_PATH_LEN)))
+        rendered.append(inline_code(truncate(path, MAX_PATH_LEN)))
     return ", ".join(rendered)
 
 
-def _format_file_change(changes: list[dict[str, Any]]) -> str:
+def format_file_change(changes: list[dict[str, Any]]) -> str:
     paths = [change.get("path") for change in changes if change.get("path")]
     if not paths:
         total = len(changes)
         return "updated files" if total == 0 else f"updated {total} files"
     if len(paths) <= 3:
-        return f"updated {_format_paths(paths)}"
+        return f"updated {format_paths(paths)}"
     return f"updated {len(paths)} files"
 
 
-def _format_tool_call(server: str, tool: str) -> str:
+def format_tool_call(server: str, tool: str) -> str:
     name = ".".join(part for part in (server, tool) if part)
     return name or "tool"
 
-def _is_command_log_line(line: str) -> bool:
+def is_command_log_line(line: str) -> bool:
     return f"{STATUS_DONE} ran:" in line
 
 
-def _extract_numeric_id(item_id: Optional[object], fallback: Optional[int] = None) -> Optional[int]:
+def extract_numeric_id(item_id: Optional[object], fallback: Optional[int] = None) -> Optional[int]:
     if isinstance(item_id, int):
         return item_id
     if isinstance(item_id, str):
@@ -106,45 +106,45 @@ def _extract_numeric_id(item_id: Optional[object], fallback: Optional[int] = Non
     return fallback
 
 
-def _with_id(item_id: Optional[int], line: str) -> str:
+def with_id(item_id: Optional[int], line: str) -> str:
     if item_id is not None:
         return f"[{item_id}] {line}"
     return f"[?] {line}"
 
 
-def _format_item_action_line(etype: str, item_id: Optional[int], item: dict[str, Any]) -> str | None:
+def format_item_action_line(etype: str, item_id: Optional[int], item: dict[str, Any]) -> str | None:
     itype = item["type"]
     if itype == "command_execution":
-        command = _format_command(item["command"])
+        command = format_command(item["command"])
         if etype == "item.started":
-            return _with_id(item_id, f"{STATUS_RUNNING} running: {command}")
+            return with_id(item_id, f"{STATUS_RUNNING} running: {command}")
         if etype == "item.completed":
             exit_code = item["exit_code"]
             exit_part = f" (exit {exit_code})" if exit_code is not None else ""
-            return _with_id(item_id, f"{STATUS_DONE} ran: {command}{exit_part}")
+            return with_id(item_id, f"{STATUS_DONE} ran: {command}{exit_part}")
         return None
 
     if itype == "mcp_tool_call":
-        name = _format_tool_call(item["server"], item["tool"])
+        name = format_tool_call(item["server"], item["tool"])
         if etype == "item.started":
-            return _with_id(item_id, f"{STATUS_RUNNING} tool: {name}")
+            return with_id(item_id, f"{STATUS_RUNNING} tool: {name}")
         if etype == "item.completed":
-            return _with_id(item_id, f"{STATUS_DONE} tool: {name}")
+            return with_id(item_id, f"{STATUS_DONE} tool: {name}")
         return None
 
     return None
 
 
-def _format_item_completed_line(item_id: Optional[int], item: dict[str, Any]) -> str | None:
+def format_item_completed_line(item_id: Optional[int], item: dict[str, Any]) -> str | None:
     itype = item["type"]
     if itype == "web_search":
-        query = _format_query(item["query"])
-        return _with_id(item_id, f"{STATUS_DONE} searched: {query}")
+        query = format_query(item["query"])
+        return with_id(item_id, f"{STATUS_DONE} searched: {query}")
     if itype == "file_change":
-        return _with_id(item_id, f"{STATUS_DONE} {_format_file_change(item['changes'])}")
+        return with_id(item_id, f"{STATUS_DONE} {format_file_change(item['changes'])}")
     if itype == "error":
-        warning = _truncate(item["message"], 120)
-        return _with_id(item_id, f"{STATUS_DONE} warning: {warning}")
+        warning = truncate(item["message"], 120)
+        return with_id(item_id, f"{STATUS_DONE} warning: {warning}")
     return None
 
 
@@ -158,13 +158,13 @@ class ExecRenderState:
     last_turn: Optional[int] = None
 
 
-def _record_item(state: ExecRenderState, item: dict[str, Any]) -> None:
-    numeric_id = _extract_numeric_id(item["id"])
+def record_item(state: ExecRenderState, item: dict[str, Any]) -> None:
+    numeric_id = extract_numeric_id(item["id"])
     if numeric_id is not None:
         state.last_turn = numeric_id
 
 
-def _set_current_action(state: ExecRenderState, item_id: Optional[int], line: str) -> bool:
+def set_current_action(state: ExecRenderState, item_id: Optional[int], line: str) -> bool:
     changed = False
     if state.current_action != line or state.current_action_id != item_id:
         state.current_action = line
@@ -176,7 +176,7 @@ def _set_current_action(state: ExecRenderState, item_id: Optional[int], line: st
     return changed
 
 
-def _complete_action(state: ExecRenderState, item_id: Optional[int], line: str) -> bool:
+def complete_action(state: ExecRenderState, item_id: Optional[int], line: str) -> bool:
     changed = False
     if state.current_reasoning:
         if not state.recent_actions or state.recent_actions[-1] != state.current_reasoning:
@@ -220,21 +220,21 @@ def render_event_cli(
 
     if etype in {"item.started", "item.updated", "item.completed"}:
         item = event["item"]
-        _record_item(state, item)
+        record_item(state, item)
 
         itype = item["type"]
-        item_num = _extract_numeric_id(item["id"], state.last_turn)
+        item_num = extract_numeric_id(item["id"], state.last_turn)
 
         if itype == "agent_message" and etype == "item.completed":
             lines.append("assistant:")
             lines.extend(indent(item["text"], "  ").splitlines())
 
         else:
-            action_line = _format_item_action_line(etype, item_num, item)
+            action_line = format_item_action_line(etype, item_num, item)
             if action_line is not None:
                 lines.append(action_line)
             elif etype == "item.completed":
-                completed_line = _format_item_completed_line(item_num, item)
+                completed_line = format_item_completed_line(item_num, item)
                 if completed_line is not None:
                     lines.append(completed_line)
 
@@ -256,14 +256,14 @@ class ExecProgressRenderer:
 
         if etype in {"item.started", "item.updated", "item.completed"}:
             item = event["item"]
-            _record_item(self.state, item)
+            record_item(self.state, item)
             itype = item["type"]
-            item_id = _extract_numeric_id(item["id"], self.state.last_turn)
+            item_id = extract_numeric_id(item["id"], self.state.last_turn)
 
             if itype == "reasoning":
-                reasoning = _format_reasoning(item["text"])
+                reasoning = format_reasoning(item["text"])
                 if reasoning:
-                    reasoning_line = _with_id(item_id, reasoning)
+                    reasoning_line = with_id(item_id, reasoning)
                     if self.state.current_action and not self.state.current_reasoning:
                         self.state.current_reasoning = reasoning_line
                         changed = True
@@ -271,23 +271,23 @@ class ExecProgressRenderer:
                         self.state.pending_reasoning = reasoning_line
                 return changed
 
-            action_line = _format_item_action_line(etype, item_id, item)
+            action_line = format_item_action_line(etype, item_id, item)
             if action_line is not None:
                 if etype == "item.started":
-                    return _set_current_action(self.state, item_id, action_line) or changed
+                    return set_current_action(self.state, item_id, action_line) or changed
                 if etype == "item.completed":
-                    return _complete_action(self.state, item_id, action_line) or changed
+                    return complete_action(self.state, item_id, action_line) or changed
                 return changed
 
             if etype == "item.completed":
-                completed_line = _format_item_completed_line(item_id, item)
+                completed_line = format_item_completed_line(item_id, item)
                 if completed_line is not None:
-                    return _complete_action(self.state, item_id, completed_line) or changed
+                    return complete_action(self.state, item_id, completed_line) or changed
 
         return changed
 
     def render_progress(self, elapsed_s: float) -> str:
-        header = _format_header(elapsed_s, self.state.last_turn, label="working")
+        header = format_header(elapsed_s, self.state.last_turn, label="working")
         current_reasoning = self.state.current_reasoning
         current_action = self.state.current_action
         lines = list(self.state.recent_actions)
@@ -302,10 +302,10 @@ class ExecProgressRenderer:
         return header
 
     def render_final(self, elapsed_s: float, answer: str, status: str = "done") -> str:
-        header = _format_header(elapsed_s, self.state.last_turn, label=status)
+        header = format_header(elapsed_s, self.state.last_turn, label=status)
         lines = list(self.state.recent_actions)
         if status == "done":
-            lines = [line for line in lines if not _is_command_log_line(line)]
+            lines = [line for line in lines if not is_command_log_line(line)]
         body = self._assemble(header, lines)
         answer = (answer or "").strip()
         if answer:
