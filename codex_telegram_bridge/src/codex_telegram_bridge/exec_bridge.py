@@ -26,6 +26,17 @@ from .telegram_client import TelegramClient
 # -------------------- Codex runner --------------------
 
 logger = logging.getLogger("exec_bridge")
+UUID_PATTERN = re.compile(
+    r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+)
+
+
+def extract_session_id(text: str | None) -> str | None:
+    if not text:
+        return None
+    if m := UUID_PATTERN.search(text):
+        return m.group(0)
+    return None
 
 
 def setup_logging(log_file: str | None) -> None:
@@ -643,19 +654,9 @@ def run(
                 repr(text),
             )
 
-            uuid_re = re.compile(
-                r"(?i)\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b"
-            )
-
-            def _extract_session_id(value: str | None) -> str | None:
-                if not value:
-                    return None
-                m = uuid_re.search(value)
-                return m.group(0) if m else None
-
-            resume_session = _extract_session_id(text)
+            resume_session = extract_session_id(text)
             r = msg.get("reply_to_message") or {}
-            resume_session = resume_session or _extract_session_id(r.get("text"))
+            resume_session = resume_session or extract_session_id(r.get("text"))
 
             pool.submit(handle, chat_id, user_msg_id, text, resume_session)
 
