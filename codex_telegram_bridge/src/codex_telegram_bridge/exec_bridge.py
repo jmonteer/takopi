@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import threading
 import time
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -28,7 +29,31 @@ from .telegram_client import TelegramClient
 
 def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{ts}] {msg}", flush=True)
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    log_debug(line)
+
+
+_file_logger: Optional[logging.Logger] = None
+
+
+def setup_file_logger(path: Optional[str]) -> None:
+    global _file_logger
+    if not path:
+        return
+    logger = logging.getLogger("exec_bridge")
+    logger.setLevel(logging.DEBUG)
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logger.addHandler(handler)
+    _file_logger = logger
+    log_debug(f"[debug] file logger initialized path={path!r}")
+
+
+def log_debug(msg: str) -> None:
+    if _file_logger is None:
+        return
+    _file_logger.debug(msg)
 
 
 def _one_line(text: Optional[str]) -> str:
@@ -78,6 +103,7 @@ class ProgressEditor:
         text = _clamp_tg_text(text)
         with self._lock:
             self._pending = (text, entities)
+        log_debug(f"[progress] set pending len={len(text)} entities={bool(entities)}")
 
     def set_markdown(self, text: str) -> None:
         rendered_text, entities = render_markdown(text)
@@ -95,10 +121,16 @@ class ProgressEditor:
                 text=text,
                 entities=entities,
             )
+            log_debug(
+                f"[progress] edit ok chat_id={self.chat_id} message_id={self.message_id} len={len(text)}"
+            )
         except Exception as e:
             log(
                 "[progress] edit failed "
                 f"chat_id={self.chat_id} message_id={self.message_id}: {e}"
+            )
+            log_debug(
+                f"[progress] edit failed chat_id={self.chat_id} message_id={self.message_id}: {e}"
             )
 
     def _run(self) -> None:
@@ -125,6 +157,7 @@ def _typing_loop(bot: TelegramClient, chat_id: int, stop_evt: threading.Event) -
             bot.send_chat_action(chat_id=chat_id, action="typing")
         except Exception as e:
             log(f"[typing] send_chat_action failed chat_id={chat_id}: {e}")
+            log_debug(f"[typing] send_chat_action failed chat_id={chat_id}: {e}")
         stop_evt.wait(4.0)
 
 
@@ -181,6 +214,7 @@ class CodexExecRunner:
             text=True,
             bufsize=1,
         )
+        log_debug(f"[codex] spawn pid={proc.pid} args={args!r}")
         assert proc.stdin and proc.stdout and proc.stderr
 
         # send prompt then close stdin
@@ -230,6 +264,7 @@ class CodexExecRunner:
                     saw_agent_message = True
 
         rc = proc.wait()
+        log_debug(f"[codex] process exit pid={proc.pid} rc={rc}")
         t.join(timeout=2.0)
 
         if rc != 0:
@@ -289,7 +324,13 @@ def run(
         "--verbose/--quiet",
         help="Include command output in CLI logs.",
     ),
+    log_file: Optional[str] = typer.Option(
+        "exec_bridge.log",
+        "--log-file",
+        help="Write detailed debug logs to this file (set to empty to disable).",
+    ),
 ) -> None:
+    setup_file_logger(log_file if log_file else None)
     config = load_telegram_config()
     token = config_get(config, "bot_token") or ""
     db_path = config_get(config, "bridge_db") or "./bridge_routes.sqlite3"
@@ -366,6 +407,10 @@ def run(
             "[handle] start "
             f"chat_id={chat_id} user_msg_id={user_msg_id} resume_session={resume_session!r}"
         )
+        log_debug(
+            "[handle] thread "
+            f"name={threading.current_thread().name} ident={threading.get_ident()}"
+        )
         edit_every_s = progress_edit_every_s
         silent_progress = progress_silent
         loud_final = final_notify
@@ -377,6 +422,7 @@ def run(
             daemon=True,
         )
         typing_thread.start()
+        log_debug("[typing] thread started")
 
         started_at = time.monotonic()
         session_box: dict[str, Optional[str]] = {"id": resume_session}
@@ -395,8 +441,10 @@ def run(
                 disable_notification=silent_progress,
             )
             progress_id = int(progress_msg["message_id"])
+            log_debug(f"[progress] sent chat_id={chat_id} message_id={progress_id}")
         except Exception as e:
             log(f"[handle] failed to send progress message chat_id={chat_id}: {e}")
+            log_debug(f"[handle] failed to send progress message chat_id={chat_id}: {e}")
 
         if progress_id is not None:
             progress = ProgressEditor(
@@ -410,6 +458,11 @@ def run(
 
         def on_event(evt: Dict[str, Any]) -> None:
             event_type = evt.get("type")
+            item = evt.get("item") or {}
+            log_debug(
+                "[codex] event "
+                f"type={event_type} item_id={item.get('id')} item_type={item.get('type')} status={item.get('status')}"
+            )
             if event_type == "thread.started":
                 thread_id = evt.get("thread_id")
                 if isinstance(thread_id, str) and thread_id:
@@ -430,8 +483,10 @@ def run(
         def _stop_background() -> None:
             typing_stop.set()
             typing_thread.join(timeout=1.0)
+            log_debug("[typing] thread stopped")
             if progress is not None:
                 progress.stop()
+                log_debug("[progress] thread stopped")
 
         try:
             session_id, answer, saw_agent_message = runner.run_serialized(
@@ -468,6 +523,7 @@ def run(
                 "[handle] error "
                 f"chat_id={chat_id} user_msg_id={user_msg_id} resume_session={resume_session!r} err={e}"
             )
+            log_debug(f"[handle] error chat_id={chat_id} user_msg_id={user_msg_id}: {e}")
             return
 
         _stop_background()
@@ -492,6 +548,9 @@ def run(
                     bot.delete_message(chat_id=chat_id, message_id=progress_id)
                 except Exception as e:
                     log(f"[handle] delete progress failed chat_id={chat_id} message_id={progress_id}: {e}")
+                    log_debug(
+                        f"[handle] delete progress failed chat_id={chat_id} message_id={progress_id}: {e}"
+                    )
         else:
             bot.edit_message_text(
                 chat_id=chat_id,
@@ -505,6 +564,7 @@ def run(
             "[handle] done "
             f"chat_id={chat_id} user_msg_id={user_msg_id} session_id={session_id!r}"
         )
+        log_debug(f"[handle] done chat_id={chat_id} user_msg_id={user_msg_id} session_id={session_id!r}")
 
     while True:
         try:
