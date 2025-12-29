@@ -10,6 +10,9 @@ def _loads(lines: str) -> list[dict]:
 
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "codex.jsonl"
+ALL_FORMATS_FIXTURE_PATH = (
+    Path(__file__).resolve().parent.parent / "codex_exec_json_all_formats.jsonl"
+)
 
 SAMPLE_STREAM = """
 {"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
@@ -60,6 +63,32 @@ def test_render_event_cli_real_run_fixture() -> None:
     assert "assistant:" in out
     assert any("takopi" in line for line in out)
     assert out[-1] == "turn completed"
+
+
+def test_render_event_cli_all_formats_fixture() -> None:
+    events = _loads(ALL_FORMATS_FIXTURE_PATH.read_text(encoding="utf-8"))
+    last_turn = None
+    out: list[str] = []
+    for evt in events:
+        last_turn, lines = render_event_cli(evt, last_turn)
+        out.extend(lines)
+
+    assert "thread started" in out
+    assert "turn started" in out
+    assert any(line.startswith("stream error:") for line in out)
+    assert any(line.startswith("4. ▸ `pytest -q`") for line in out)
+    assert any("✗ `pytest -q` (exit 1)" in line for line in out)
+    assert any("searched: python jsonlines parser handle unknown fields" in line for line in out)
+    assert any("tool: github.search_issues" in line for line in out)
+    assert any("updated `src/compute_answer.py`" in line for line in out)
+    assert any(
+        line.startswith(
+            "turn failed: Aborted: required dependency `npm` is missing; cannot continue."
+        )
+        for line in out
+    )
+    assert "assistant:" in out
+    assert any("Legacy schema example" in line for line in out)
 
 
 def test_progress_renderer_renders_progress_and_final() -> None:

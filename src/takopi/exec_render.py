@@ -90,14 +90,19 @@ def format_event(
             return last_item, [f"stream error: {event['message']}"], None, None
         case "item.started" | "item.updated" | "item.completed" as etype:
             item = event["item"]
-            item_num = extract_numeric_id(item["id"], last_item)
+            item_type = item.get("type") or item.get("item_type")
+            if item_type == "assistant_message":
+                item_type = "agent_message"
+            if item_type is None:
+                return last_item, [], None, None
+            item_num = extract_numeric_id(item.get("id"), last_item)
             last_item = item_num if item_num is not None else last_item
             prefix = f"{item_num}. "
             if escape_markdown and item_num is not None:
                 # Avoid ordered-list parsing which renumbers items in MarkdownIt/CommonMark.
                 prefix = f"{item_num}\\." + " "
 
-            match (item["type"], etype):
+            match (item_type, etype):
                 case ("agent_message", "item.completed"):
                     lines.append("assistant:")
                     lines.extend(indent(item["text"], "  ").splitlines())
