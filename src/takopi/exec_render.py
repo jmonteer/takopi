@@ -57,14 +57,6 @@ def format_header(elapsed_s: float, item: int | None, label: str) -> str:
     return HEADER_SEP.join(parts)
 
 
-def is_command_log_line(line: str) -> bool:
-    return (
-        f"{STATUS_RUNNING} " in line
-        or f"{STATUS_DONE} " in line
-        or f"{STATUS_FAIL} " in line
-    )
-
-
 def extract_numeric_id(item_id: object, fallback: int | None = None) -> int | None:
     if isinstance(item_id, int):
         return item_id
