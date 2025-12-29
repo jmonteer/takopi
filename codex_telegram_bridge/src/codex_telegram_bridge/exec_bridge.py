@@ -8,12 +8,10 @@ import os
 import re
 import shlex
 import shutil
-import sys
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from logging.handlers import RotatingFileHandler
 from typing import Any
 
 import typer
@@ -21,6 +19,7 @@ import typer
 from .config import load_telegram_config
 from .constants import TELEGRAM_HARD_LIMIT
 from .exec_render import ExecProgressRenderer, render_event_cli
+from .logging import setup_logging
 from .rendering import render_markdown
 from .telegram_client import TelegramClient
 
@@ -51,33 +50,6 @@ async def _drain_stderr(stderr: asyncio.StreamReader | None, tail: deque[str]) -
             tail.append(decoded)
     except Exception as e:
         logger.debug("[codex][stderr] drain error: %s", e)
-
-
-def setup_logging(log_file: str | None, *, debug: bool = False) -> None:
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-        handler.close()
-
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-    console = logging.StreamHandler(sys.stdout)
-    console.setLevel(logging.DEBUG if debug else logging.INFO)
-    console.setFormatter(fmt)
-    root_logger.addHandler(console)
-
-    if log_file:
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=5 * 1024 * 1024,
-            backupCount=3,
-            encoding="utf-8",
-        )
-        file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
-        file_handler.setFormatter(fmt)
-        root_logger.addHandler(file_handler)
-        logger.debug("[debug] file logger initialized path=%r", log_file)
 
 
 TELEGRAM_TEXT_LIMIT = TELEGRAM_HARD_LIMIT
@@ -338,7 +310,6 @@ class BridgeConfig:
     chat_id: int
     ignore_backlog: bool
     progress_edit_every_s: float
-    progress_silent: bool
     final_notify: bool
     startup_msg: str
     max_concurrency: int
@@ -347,7 +318,6 @@ class BridgeConfig:
 def _parse_bridge_config(
     *,
     progress_edit_every_s: float,
-    progress_silent: bool,
     final_notify: bool,
     ignore_backlog: bool,
     cd: str | None,
@@ -398,7 +368,6 @@ def _parse_bridge_config(
         chat_id=chat_id,
         ignore_backlog=bool(ignore_backlog),
         progress_edit_every_s=progress_edit_every_s,
-        progress_silent=progress_silent,
         final_notify=final_notify,
         startup_msg=startup_msg,
         max_concurrency=16,
@@ -500,7 +469,7 @@ async def _handle_message(
             text=initial_rendered,
             entities=initial_entities,
             reply_to_message_id=user_msg_id,
-            disable_notification=cfg.progress_silent,
+            disable_notification=True,
         )
         progress_id = int(progress_msg["message_id"])
         last_edit_at = time.monotonic()
@@ -556,7 +525,7 @@ async def _handle_message(
                 chat_id=chat_id,
                 text=err,
                 reply_to_message_id=user_msg_id,
-                disable_notification=cfg.progress_silent,
+                disable_notification=True,
             )
             return
 
@@ -683,11 +652,6 @@ def run(
         help="Minimum seconds between progress message edits.",
         min=1.0,
     ),
-    progress_silent: bool = typer.Option(
-        True,
-        "--progress-silent/--no-progress-silent",
-        help="Send the progress message without sound/vibration.",
-    ),
     final_notify: bool = typer.Option(
         True,
         "--final-notify/--no-final-notify",
@@ -704,9 +668,9 @@ def run(
         help="Log codex JSONL, Telegram requests, and rendered messages.",
     ),
     log_file: str | None = typer.Option(
-        "exec_bridge.log",
+        None,
         "--log-file",
-        help="Write detailed debug logs to this file (set to empty to disable).",
+        help="Write detailed logs to this file.",
     ),
     cd: str | None = typer.Option(
         None,
@@ -722,7 +686,6 @@ def run(
     setup_logging(log_file if log_file else None, debug=debug)
     cfg = _parse_bridge_config(
         progress_edit_every_s=progress_edit_every_s,
-        progress_silent=progress_silent,
         final_notify=final_notify,
         ignore_backlog=ignore_backlog,
         cd=cd,

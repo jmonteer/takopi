@@ -36,11 +36,12 @@ uv run exec-bridge
 Optional flags:
 
 - `--progress-edit-every FLOAT` (default `2.0`)
-- `--progress-silent/--no-progress-silent` (default silent)
 - `--final-notify/--no-final-notify` (default notify via new message)
 - `--ignore-backlog/--process-backlog` (default ignore pending updates)
 - `--cd PATH` (pass through to `codex --cd`)
 - `--model NAME` (pass through to `codex exec`)
+
+Progress updates are always sent silently.
 
 To resume an existing thread without a database, reply with (or include) the session id shown at the end of the bot response:
 
