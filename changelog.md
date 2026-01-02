@@ -1,5 +1,12 @@
 # changelog
 
+## v0.5.1 (2026-01-02)
+
+### changes
+
+- relax telegram ACL to check chat id only, enabling use in group chats and channels
+- improve onboarding documentation and add tests
+
 ## v0.5.0 (2026-01-02)
 
 ### changes
