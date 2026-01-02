@@ -1,5 +1,13 @@
 # changelog
 
+## v0.5.2 (2026-01-02)
+
+### fixes
+
+- treat codex reconnect notices as non-fatal progress updates instead of errors
+- filter unavailable agents from startup display and slash command menu
+- avoid crashes when codex tool/file-change events omit error fields
+
 ## v0.5.1 (2026-01-02)
 
 ### changes

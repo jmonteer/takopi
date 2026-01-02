@@ -174,7 +174,11 @@ def _parse_bridge_config(
         backends=backends,
         default_engine=default_engine,
     )
-    engine_list = ", ".join(router.engine_ids)
+    available_engines = [entry.engine for entry in router.available_entries]
+    missing_engines = [entry.engine for entry in router.entries if not entry.available]
+    engine_list = ", ".join(available_engines) if available_engines else "none"
+    if missing_engines:
+        engine_list = f"{engine_list} (not installed: {', '.join(missing_engines)})"
     startup_msg = (
         f"\N{OCTOPUS} **takopi is ready**\n\n"
         f"default: `{router.default_engine}`  \n"
