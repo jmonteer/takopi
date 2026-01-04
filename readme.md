@@ -138,6 +138,12 @@ enabled = true
 transcribe_cmd = ["whisper-cli", "-m", "/abs/path/to/ggml-base.en.bin", "-f", "{wav}", "-nt"]
 ```
 
+or run the standalone setup wizard:
+
+```sh
+takopi voice-onboard
+```
+
 use absolute paths (no `~`). if `whisper-cli` is not on PATH, use the absolute
 path from `command -v whisper-cli`.
 

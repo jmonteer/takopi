@@ -22,7 +22,7 @@ from .router import AutoRouter, RunnerUnavailableError
 from .runner import Runner
 from .scheduler import ThreadJob, ThreadScheduler
 from .telegram import BotClient
-from .voice import VoiceConfig, resolve_user_prompt
+from .plugins.voice import VoiceConfig, resolve_user_prompt
 
 
 logger = get_logger(__name__)

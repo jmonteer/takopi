@@ -19,7 +19,7 @@ from .logging import get_logger, setup_logging
 from .onboarding import SetupResult, check_setup, interactive_setup
 from .router import AutoRouter, RunnerEntry
 from .telegram import TelegramClient
-from .voice import load_voice_config
+from .plugins.voice import interactive_voice_setup, load_voice_config
 
 logger = get_logger(__name__)
 
@@ -351,6 +351,22 @@ def app_main(
             onboard=onboard,
         )
         raise typer.Exit()
+
+
+@app.command("voice-onboard")
+def voice_onboard(
+    force: bool = typer.Option(
+        False,
+        "--force/--no-force",
+        help="Overwrite any existing [voice] config.",
+    ),
+) -> None:
+    """Run the voice notes setup wizard."""
+    if not _should_run_interactive():
+        typer.echo("error: voice-onboard requires a TTY", err=True)
+        raise typer.Exit(code=1)
+    if not interactive_voice_setup(force=force):
+        raise typer.Exit(code=1)
 
 
 def make_engine_cmd(engine_id: str) -> Callable[..., None]:
