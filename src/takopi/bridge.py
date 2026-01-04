@@ -752,11 +752,11 @@ async def _wait_for_resume(running_task: RunningTask) -> ResumeToken | None:
 
 async def _send_with_resume(
     bot: BotClient,
-    enqueue: Callable[[int, int, dict[str, Any], ResumeToken], Awaitable[None]],
+    enqueue: Callable[[int, int, str, ResumeToken], Awaitable[None]],
     running_task: RunningTask,
     chat_id: int,
     user_msg_id: int,
-    msg: dict[str, Any],
+    text: str,
 ) -> None:
     resume = await _wait_for_resume(running_task)
     if resume is None:
@@ -767,7 +767,7 @@ async def _send_with_resume(
             disable_notification=True,
         )
         return
-    await enqueue(chat_id, user_msg_id, msg, resume)
+    await enqueue(chat_id, user_msg_id, text, resume)
 
 
 async def _send_runner_unavailable(
@@ -809,7 +809,7 @@ async def run_main_loop(
             async def run_job(
                 chat_id: int,
                 user_msg_id: int,
-                msg: dict[str, Any],
+                text: str,
                 resume_token: ResumeToken | None,
                 on_thread_known: Callable[[ResumeToken, anyio.Event], Awaitable[None]]
                 | None = None,
@@ -856,7 +856,7 @@ async def run_main_loop(
                         runner=entry.runner,
                         chat_id=chat_id,
                         user_msg_id=user_msg_id,
-                        text=prompt,
+                        text=text,
                         resume_token=resume_token,
                         strip_resume_line=cfg.router.is_resume_line,
                         running_tasks=running_tasks,
@@ -875,29 +875,28 @@ async def run_main_loop(
                 await run_job(
                     job.chat_id,
                     job.user_msg_id,
-                    job.msg,
+                    job.text,
                     job.resume_token,
                 )
 
             scheduler = ThreadScheduler(task_group=tg, run_job=run_thread_job)
 
             async for msg in poller(cfg):
-                msg_for_job = msg
-                text = msg.get("text")
+                # TODO: Voice transcription happens before queueing, so voice notes
+                # may be processed out of order relative to the per-thread queue.
+                prompt = await resolve_user_prompt(msg, cfg=cfg.voice, bot=cfg.bot)
+                if prompt is None:
+                    continue
+                text = prompt
                 user_msg_id = msg["message_id"]
-                engine_override = None
 
-                if isinstance(text, str):
-                    if _is_cancel_command(text):
-                        tg.start_soon(_handle_cancel, cfg, msg, running_tasks)
-                        continue
+                if _is_cancel_command(text):
+                    tg.start_soon(_handle_cancel, cfg, msg, running_tasks)
+                    continue
 
-                    text, engine_override = _strip_engine_command(
-                        text, engine_ids=cfg.router.engine_ids
-                    )
-                    if msg.get("text") != text:
-                        msg_for_job = dict(msg)
-                        msg_for_job["text"] = text
+                text, engine_override = _strip_engine_command(
+                    text, engine_ids=cfg.router.engine_ids
+                )
 
                 r = msg.get("reply_to_message") or {}
                 resume_token = cfg.router.resolve_resume(text, r.get("text"))
@@ -915,7 +914,7 @@ async def run_main_loop(
                             running_task,
                             msg["chat"]["id"],
                             user_msg_id,
-                            msg_for_job,
+                            text,
                         )
                         continue
 
@@ -924,14 +923,14 @@ async def run_main_loop(
                         run_job,
                         msg["chat"]["id"],
                         user_msg_id,
-                        msg_for_job,
+                        text,
                         None,
                         scheduler.note_thread_known,
                         engine_override,
                     )
                 else:
                     await scheduler.enqueue_resume(
-                        msg["chat"]["id"], user_msg_id, msg_for_job, resume_token
+                        msg["chat"]["id"], user_msg_id, text, resume_token
                     )
     finally:
         await cfg.bot.close()

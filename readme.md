@@ -42,7 +42,6 @@ run `takopi` and follow the interactive prompts. it will:
 - help you create a bot token (via @BotFather)
 - capture your `chat_id` from the most recent message you send to the bot
 - check installed agents and set a default engine
-- optionally configure voice note transcription
 
 to re-run onboarding (and overwrite config), use `takopi --onboard`.
 

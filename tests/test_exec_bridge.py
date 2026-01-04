@@ -819,12 +819,12 @@ async def test_send_with_resume_waits_for_token() -> None:
     from takopi.bridge import RunningTask, _send_with_resume
 
     bot = _FakeBot()
-    sent: list[tuple[int, int, dict, ResumeToken | None]] = []
+    sent: list[tuple[int, int, str, ResumeToken | None]] = []
 
     async def enqueue(
-        chat_id: int, user_msg_id: int, msg: dict, resume: ResumeToken
+        chat_id: int, user_msg_id: int, text: str, resume: ResumeToken
     ) -> None:
-        sent.append((chat_id, user_msg_id, msg, resume))
+        sent.append((chat_id, user_msg_id, text, resume))
 
     running_task = RunningTask()
 
@@ -841,11 +841,11 @@ async def test_send_with_resume_waits_for_token() -> None:
             running_task,
             123,
             10,
-            {"text": "hello"},
+            "hello",
         )
 
     assert sent == [
-        (123, 10, {"text": "hello"}, ResumeToken(engine=CODEX_ENGINE, value="abc123"))
+        (123, 10, "hello", ResumeToken(engine=CODEX_ENGINE, value="abc123"))
     ]
 
 
@@ -854,12 +854,12 @@ async def test_send_with_resume_reports_when_missing() -> None:
     from takopi.bridge import RunningTask, _send_with_resume
 
     bot = _FakeBot()
-    sent: list[tuple[int, int, dict, ResumeToken | None]] = []
+    sent: list[tuple[int, int, str, ResumeToken | None]] = []
 
     async def enqueue(
-        chat_id: int, user_msg_id: int, msg: dict, resume: ResumeToken
+        chat_id: int, user_msg_id: int, text: str, resume: ResumeToken
     ) -> None:
-        sent.append((chat_id, user_msg_id, msg, resume))
+        sent.append((chat_id, user_msg_id, text, resume))
 
     running_task = RunningTask()
     running_task.done.set()
@@ -870,7 +870,7 @@ async def test_send_with_resume_reports_when_missing() -> None:
         running_task,
         123,
         10,
-        {"text": "hello"},
+        "hello",
     )
 
     assert sent == []

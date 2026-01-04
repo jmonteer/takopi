@@ -27,9 +27,6 @@ from .engines import list_backends
 from .logging import suppress_logs
 from .telegram import TelegramClient, TelegramRetryAfter
 
-VOICE_MODEL_URL = (
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-)
 
 @dataclass(slots=True)
 class SetupResult:
@@ -122,54 +119,13 @@ def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _toml_list(values: list[str]) -> str:
-    return "[" + ", ".join(f'"{_toml_escape(value)}"' for value in values) + "]"
-
-
-def _default_voice_model_path() -> Path:
-    return Path.home() / ".takopi" / "models" / "ggml-base.en.bin"
-
-
-def _default_voice_transcribe_cmd(
-    model_path: Path, whisper_path: str | None
-) -> list[str]:
-    return [
-        whisper_path or "whisper-cli",
-        "-m",
-        str(model_path),
-        "-f",
-        "{wav}",
-        "-nt",
-    ]
-
-
-def _render_voice_config(transcribe_cmd: list[str]) -> list[str]:
-    return [
-        "[voice]",
-        "enabled = true",
-        "max_duration_sec = 300",
-        'prompt_template = "Voice transcription:\\n{transcript}"',
-        'backend = "cmd"',
-        f"transcribe_cmd = {_toml_list(transcribe_cmd)}",
-        '# language = "en"',
-    ]
-
-
-def _render_config(
-    token: str,
-    chat_id: int,
-    default_engine: str | None,
-    voice_transcribe_cmd: list[str] | None = None,
-) -> str:
+def _render_config(token: str, chat_id: int, default_engine: str | None) -> str:
     lines: list[str] = []
     if default_engine:
         lines.append(f'default_engine = "{_toml_escape(default_engine)}"')
         lines.append("")
     lines.append(f'bot_token = "{_toml_escape(token)}"')
     lines.append(f"chat_id = {chat_id}")
-    if voice_transcribe_cmd is not None:
-        lines.append("")
-        lines.extend(_render_voice_config(voice_transcribe_cmd))
     return "\n".join(lines) + "\n"
 
 
@@ -446,48 +402,12 @@ def interactive_setup(*, force: bool) -> bool:
         else:
             console.print("no agents found on PATH. install one to continue.")
 
-        console.print("\nstep 3: voice notes (optional)")
-        voice_transcribe_cmd: list[str] | None = None
-        enable_voice = _confirm("enable voice note transcription?", default=False)
-        if enable_voice is None:
-            return False
-        if enable_voice:
-            ffmpeg_path = shutil.which("ffmpeg")
-            whisper_path = shutil.which("whisper-cli")
-            model_path = _default_voice_model_path()
-            if ffmpeg_path:
-                console.print(f"  ffmpeg: {ffmpeg_path}")
-            else:
-                console.print("  ffmpeg: not found")
-            if whisper_path:
-                console.print(f"  whisper-cli: {whisper_path}")
-            else:
-                console.print("  whisper-cli: not found")
-            if not ffmpeg_path or not whisper_path:
-                if shutil.which("brew"):
-                    console.print("  install: brew install ffmpeg whisper-cpp")
-                else:
-                    console.print(
-                        "  install ffmpeg and whisper-cpp (whisper-cli) and ensure they're on PATH."
-                    )
-            if model_path.exists():
-                console.print(f"  model: {_display_path(model_path)}")
-            else:
-                console.print(f"  model: {_display_path(model_path)} (missing)")
-                console.print(f"  mkdir -p {_display_path(model_path.parent)}")
-                console.print(f"  curl -L -o {_display_path(model_path)} {VOICE_MODEL_URL}")
-            voice_transcribe_cmd = _default_voice_transcribe_cmd(
-                model_path,
-                whisper_path,
-            )
-
         config_preview = _render_config(
             _mask_token(token),
             chat.chat_id,
             default_engine,
-            voice_transcribe_cmd,
         ).rstrip()
-        console.print("\nstep 4: save configuration\n")
+        console.print("\nstep 3: save configuration\n")
         console.print(f"  {_display_path(config_path)}\n")
         for line in config_preview.splitlines():
             console.print(f"  {line}")
@@ -501,12 +421,7 @@ def interactive_setup(*, force: bool) -> bool:
             return False
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_text = _render_config(
-            token,
-            chat.chat_id,
-            default_engine,
-            voice_transcribe_cmd,
-        )
+        config_text = _render_config(token, chat.chat_id, default_engine)
         config_path.write_text(config_text, encoding="utf-8")
         console.print(f"  config saved to {_display_path(config_path)}")
 

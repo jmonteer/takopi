@@ -13,7 +13,7 @@ from .model import ResumeToken
 class ThreadJob:
     chat_id: int
     user_msg_id: int
-    msg: dict[str, Any]
+    text: str
     resume_token: ResumeToken
 
 
@@ -64,14 +64,14 @@ class ThreadScheduler:
         self,
         chat_id: int,
         user_msg_id: int,
-        msg: dict[str, Any],
+        text: str,
         resume_token: ResumeToken,
     ) -> None:
         await self.enqueue(
             ThreadJob(
                 chat_id=chat_id,
                 user_msg_id=user_msg_id,
-                msg=msg,
+                text=text,
                 resume_token=resume_token,
             )
         )
