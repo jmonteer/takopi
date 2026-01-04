@@ -62,7 +62,7 @@ def test_truncate_transcript_with_suffix() -> None:
     assert truncated == "ab..."
 
 
-def test_build_transcript_message_spoiler_offsets() -> None:
+def test_build_transcript_message_no_spoiler() -> None:
     transcript = "a\U0001F4A9b"
 
     message, entities, truncated = build_transcript_message(transcript, max_len=200)
@@ -70,9 +70,4 @@ def test_build_transcript_message_spoiler_offsets() -> None:
     prefix = f"{TRANSCRIPT_HEADER}\n"
     assert truncated is False
     assert message == f"{prefix}{transcript}"
-    assert len(entities) == 1
-
-    entity = entities[0]
-    assert entity["type"] == "spoiler"
-    assert entity["offset"] == len(prefix.encode("utf-16-le")) // 2
-    assert entity["length"] == len(transcript.encode("utf-16-le")) // 2
+    assert entities == []

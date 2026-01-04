@@ -19,7 +19,7 @@ DEFAULT_MAX_DURATION_SEC = 300
 DEFAULT_TRANSCRIBE_TIMEOUT_SEC = 60
 DEFAULT_BACKEND = "cmd"
 MAX_TELEGRAM_TEXT_LEN = 4096
-TRANSCRIPT_HEADER = "Transcript (tap to reveal):"
+TRANSCRIPT_HEADER = "Transcript:"
 TRANSCRIPT_TRUNCATION_SUFFIX = "..."
 FFMPEG_TIMEOUT_SEC = 30
 
@@ -88,16 +88,7 @@ def build_transcript_message(
     remaining = max_len - len(prefix)
     shown, truncated = truncate_transcript(transcript, max_len=remaining)
     message = f"{prefix}{shown}"
-    entities: list[dict[str, int]] = []
-    if shown:
-        entities.append(
-            {
-                "type": "spoiler",
-                "offset": _utf16_len(prefix),
-                "length": _utf16_len(shown),
-            }
-        )
-    return message, entities, truncated
+    return message, [], truncated
 
 
 async def resolve_user_prompt(
@@ -499,8 +490,6 @@ async def _read_stream(stream: anyio.abc.ByteReceiveStream, buf: bytearray) -> N
         buf.extend(chunk)
 
 
-def _utf16_len(text: str) -> int:
-    return len(text.encode("utf-16-le")) // 2
 
 
 def _optional_bool(

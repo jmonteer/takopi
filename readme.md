@@ -148,8 +148,7 @@ use absolute paths (no `~`). if `whisper-cli` is not on PATH, use the absolute
 path from `command -v whisper-cli`.
 
 when a voice note or audio file arrives, takopi replies `Transcribing...` and then
-edits that message into `Transcript (tap to reveal): ...` with a spoiler. transcripts
-are kept in chat.
+edits that message into `Transcript: ...`. transcripts are kept in chat.
 
 voice notes use the default engine unless you reply to a resume line; captions are
 ignored. max duration is 5 minutes.
