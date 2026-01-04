@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, Literal
 
+import anyio
+
 from .config import ConfigError
+from .telegram import BotClient
+from .utils.subprocess import manage_subprocess
 
 DEFAULT_PROMPT_TEMPLATE = "Voice transcription:\n{transcript}"
 DEFAULT_MAX_DURATION_SEC = 300
@@ -13,6 +20,9 @@ DEFAULT_BACKEND = "cmd"
 MAX_TELEGRAM_TEXT_LEN = 4096
 TRANSCRIPT_HEADER = "Transcript (tap to reveal):"
 TRANSCRIPT_TRUNCATION_SUFFIX = "..."
+FFMPEG_TIMEOUT_SEC = 30
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +44,12 @@ class VoiceConfig:
     transcribe_cmd: list[str]
     transcribe_timeout_sec: int
     language: str | None
+
+
+class VoiceError(RuntimeError):
+    def __init__(self, user_message: str) -> None:
+        super().__init__(user_message)
+        self.user_message = user_message
 
 
 def extract_voice_input(msg: dict[str, Any]) -> VoiceInput | None:
@@ -81,6 +97,111 @@ def build_transcript_message(
             }
         )
     return message, entities, truncated
+
+
+async def resolve_user_prompt(
+    msg: dict[str, Any],
+    *,
+    cfg: VoiceConfig,
+    bot: BotClient,
+) -> str | None:
+    text = msg.get("text")
+    if isinstance(text, str):
+        return text
+
+    voice_input = extract_voice_input(msg)
+    if voice_input is None:
+        return None
+
+    chat_id = _get_chat_id(msg)
+    user_msg_id = _get_message_id(msg)
+    if chat_id is None or user_msg_id is None:
+        return None
+
+    if not cfg.enabled:
+        await _send_voice_reply(
+            bot, chat_id, user_msg_id, "voice notes are disabled"
+        )
+        return None
+
+    if (
+        voice_input.duration is not None
+        and voice_input.duration > cfg.max_duration_sec
+    ):
+        await _send_voice_reply(bot, chat_id, user_msg_id, "voice note too long")
+        return None
+
+    transcribing_id = await _send_transcribing(bot, chat_id, user_msg_id)
+    try:
+        transcript = await transcribe_voice_input(voice_input, cfg=cfg, bot=bot)
+    except VoiceError as exc:
+        await _send_voice_error(
+            bot,
+            chat_id,
+            user_msg_id,
+            transcribing_id,
+            exc.user_message,
+        )
+        return None
+
+    await _edit_transcript_message(
+        bot,
+        chat_id,
+        user_msg_id,
+        transcribing_id,
+        transcript,
+    )
+
+    return cfg.prompt_template.format(transcript=transcript)
+
+
+async def transcribe_voice_input(
+    voice_input: VoiceInput,
+    *,
+    cfg: VoiceConfig,
+    bot: BotClient,
+) -> str:
+    download_start = time.monotonic()
+    file_info = await bot.get_file(voice_input.file_id)
+    file_path = None
+    if isinstance(file_info, dict):
+        raw_path = file_info.get("file_path")
+        if isinstance(raw_path, str) and raw_path:
+            file_path = raw_path
+    if not file_path:
+        raise VoiceError("could not download voice note")
+
+    data = await bot.download_file(file_path)
+    if not data:
+        raise VoiceError("could not download voice note")
+    download_elapsed = time.monotonic() - download_start
+
+    suffix = Path(file_path).suffix
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        temp_dir = Path(tmp_dir)
+        input_path = temp_dir / f"input{suffix}"
+        output_path = temp_dir / "voice.wav"
+        input_path.write_bytes(data)
+
+        ffmpeg_start = time.monotonic()
+        await _run_ffmpeg(input_path, output_path)
+        ffmpeg_elapsed = time.monotonic() - ffmpeg_start
+
+        transcribe_start = time.monotonic()
+        transcript = await _run_transcribe_cmd(output_path, cfg)
+        transcribe_elapsed = time.monotonic() - transcribe_start
+
+    logger.debug(
+        "[voice] download=%.2fs ffmpeg=%.2fs transcribe=%.2fs",
+        download_elapsed,
+        ffmpeg_elapsed,
+        transcribe_elapsed,
+    )
+
+    transcript = _normalize_transcript(transcript)
+    if not transcript:
+        raise VoiceError("transcription failed")
+    return transcript
 
 
 def transcribe_cmd_needs_lang(cmd: list[str]) -> bool:
@@ -196,6 +317,185 @@ def _coerce_str(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     return value or None
+
+
+def _get_chat_id(msg: dict[str, Any]) -> int | None:
+    chat = msg.get("chat")
+    if not isinstance(chat, dict):
+        return None
+    chat_id = chat.get("id")
+    if isinstance(chat_id, bool) or not isinstance(chat_id, int):
+        return None
+    return chat_id
+
+
+def _get_message_id(msg: dict[str, Any]) -> int | None:
+    msg_id = msg.get("message_id")
+    if isinstance(msg_id, bool) or not isinstance(msg_id, int):
+        return None
+    return msg_id
+
+
+async def _send_transcribing(
+    bot: BotClient, chat_id: int, user_msg_id: int
+) -> int | None:
+    msg = await bot.send_message(
+        chat_id=chat_id,
+        text="Transcribing...",
+        reply_to_message_id=user_msg_id,
+        disable_notification=True,
+    )
+    if msg is None:
+        return None
+    msg_id = msg.get("message_id")
+    return int(msg_id) if isinstance(msg_id, int) else None
+
+
+async def _send_voice_reply(
+    bot: BotClient, chat_id: int, user_msg_id: int, text: str
+) -> None:
+    await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_to_message_id=user_msg_id,
+    )
+
+
+async def _send_voice_error(
+    bot: BotClient,
+    chat_id: int,
+    user_msg_id: int,
+    transcribing_id: int | None,
+    text: str,
+) -> None:
+    if transcribing_id is not None:
+        edited = await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=transcribing_id,
+            text=text,
+        )
+        if edited is not None:
+            return
+    await _send_voice_reply(bot, chat_id, user_msg_id, text)
+
+
+async def _edit_transcript_message(
+    bot: BotClient,
+    chat_id: int,
+    user_msg_id: int,
+    transcribing_id: int | None,
+    transcript: str,
+) -> None:
+    text, entities, _ = build_transcript_message(transcript)
+    if transcribing_id is not None:
+        edited = await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=transcribing_id,
+            text=text,
+            entities=entities,
+        )
+        if edited is not None:
+            return
+    await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        entities=entities,
+        reply_to_message_id=user_msg_id,
+        disable_notification=True,
+    )
+
+
+def _normalize_transcript(text: str) -> str:
+    return " ".join(text.split()).strip()
+
+
+def _format_transcribe_cmd(
+    cmd: list[str], *, wav_path: Path, language: str | None
+) -> list[str]:
+    lang = language or ""
+    return [
+        part.replace("{wav}", str(wav_path)).replace("{lang}", lang) for part in cmd
+    ]
+
+
+async def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        str(input_path),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        str(output_path),
+    ]
+    try:
+        rc, _, stderr = await _run_process(cmd, timeout_s=FFMPEG_TIMEOUT_SEC)
+    except TimeoutError as exc:
+        raise VoiceError("could not decode audio") from exc
+    if rc != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+        logger.debug(
+            "[voice] ffmpeg failed rc=%s stderr=%s",
+            rc,
+            stderr.decode("utf-8", errors="replace"),
+        )
+        raise VoiceError("could not decode audio")
+
+
+async def _run_transcribe_cmd(wav_path: Path, cfg: VoiceConfig) -> str:
+    cmd = _format_transcribe_cmd(
+        cfg.transcribe_cmd,
+        wav_path=wav_path,
+        language=cfg.language,
+    )
+    try:
+        rc, stdout, stderr = await _run_process(
+            cmd, timeout_s=cfg.transcribe_timeout_sec
+        )
+    except TimeoutError as exc:
+        raise VoiceError("transcription failed") from exc
+    if rc != 0:
+        logger.debug(
+            "[voice] transcribe failed rc=%s stderr=%s",
+            rc,
+            stderr.decode("utf-8", errors="replace"),
+        )
+        raise VoiceError("transcription failed")
+    text = stdout.decode("utf-8", errors="replace")
+    if not text.strip():
+        raise VoiceError("transcription failed")
+    return text
+
+
+async def _run_process(cmd: list[str], *, timeout_s: int) -> tuple[int, bytes, bytes]:
+    stdout_buf = bytearray()
+    stderr_buf = bytearray()
+    async with manage_subprocess(
+        cmd,
+        stdout=anyio.subprocess.PIPE,
+        stderr=anyio.subprocess.PIPE,
+    ) as proc:
+        async with anyio.create_task_group() as tg:
+            if proc.stdout is not None:
+                tg.start_soon(_read_stream, proc.stdout, stdout_buf)
+            if proc.stderr is not None:
+                tg.start_soon(_read_stream, proc.stderr, stderr_buf)
+            with anyio.fail_after(timeout_s):
+                await proc.wait()
+    rc = proc.returncode or 0
+    return rc, bytes(stdout_buf), bytes(stderr_buf)
+
+
+async def _read_stream(stream: anyio.abc.ByteReceiveStream, buf: bytearray) -> None:
+    while True:
+        try:
+            chunk = await stream.receive(65536)
+        except anyio.EndOfStream:
+            return
+        buf.extend(chunk)
 
 
 def _utf16_len(text: str) -> int:
