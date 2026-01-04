@@ -22,7 +22,7 @@ voice notes and audio files via transcription (optional).
 
 - `uv` for installation (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - python 3.14+ (uv can install it: `uv python install 3.14`)
-- `ffmpeg` for voice note transcription
+- `ffmpeg` and `whisper-cli` (via `whisper-cpp`) for voice note transcription
 - at least one engine installed:
   - `codex` on PATH (`npm install -g @openai/codex` or `brew install codex`)
   - `claude` on PATH (`npm install -g @anthropic-ai/claude-code`)
@@ -42,6 +42,7 @@ run `takopi` and follow the interactive prompts. it will:
 - help you create a bot token (via @BotFather)
 - capture your `chat_id` from the most recent message you send to the bot
 - check installed agents and set a default engine
+- optionally configure voice note transcription
 
 to re-run onboarding (and overwrite config), use `takopi --onboard`.
 
@@ -83,7 +84,8 @@ enabled = false
 max_duration_sec = 300
 prompt_template = "Voice transcription:\n{transcript}"
 backend = "cmd"
-transcribe_cmd = ["whisper-cli", "-m", "/models/ggml-base.en.bin", "-f", "{wav}"]
+transcribe_cmd = ["whisper-cli", "-m", "/abs/path/to/ggml-base.en.bin", "-f", "{wav}", "-nt"]
+# use absolute paths; "~" is not expanded
 # language = "en"
 ```
 
@@ -117,8 +119,28 @@ if you prefer no notifications, `--no-final-notify` edits the progress message i
 
 ## voice notes
 
-optional. enable with the `[voice]` config and ensure `ffmpeg` plus your chosen
-transcription cli are on PATH.
+optional. enable with the `[voice]` config and ensure `ffmpeg`, `whisper-cli`,
+and a GGML model file are available.
+
+macOS (Homebrew):
+
+```sh
+brew install ffmpeg whisper-cpp
+mkdir -p ~/.takopi/models
+curl -L -o ~/.takopi/models/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+```
+
+then update your config:
+
+```toml
+[voice]
+enabled = true
+transcribe_cmd = ["whisper-cli", "-m", "/abs/path/to/ggml-base.en.bin", "-f", "{wav}", "-nt"]
+```
+
+use absolute paths (no `~`). if `whisper-cli` is not on PATH, use the absolute
+path from `command -v whisper-cli`.
 
 when a voice note or audio file arrives, takopi replies `Transcribing...` and then
 edits that message into `Transcript (tap to reveal): ...` with a spoiler. transcripts

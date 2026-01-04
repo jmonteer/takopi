@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -475,8 +476,8 @@ async def _run_process(cmd: list[str], *, timeout_s: int) -> tuple[int, bytes, b
     stderr_buf = bytearray()
     async with manage_subprocess(
         cmd,
-        stdout=anyio.subprocess.PIPE,
-        stderr=anyio.subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     ) as proc:
         async with anyio.create_task_group() as tg:
             if proc.stdout is not None:
