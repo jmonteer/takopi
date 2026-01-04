@@ -22,7 +22,7 @@ from .router import AutoRouter, RunnerUnavailableError
 from .runner import Runner
 from .scheduler import ThreadJob, ThreadScheduler
 from .telegram import BotClient
-from .voice import VoiceConfig
+from .voice import VoiceConfig, resolve_user_prompt
 
 
 logger = get_logger(__name__)
@@ -673,7 +673,11 @@ async def poll_updates(cfg: BridgeConfig) -> AsyncIterator[dict[str, Any]]:
         for upd in updates:
             offset = upd["update_id"] + 1
             msg = upd["message"]
-            if "text" not in msg:
+            if (
+                "text" not in msg
+                and "voice" not in msg
+                and "audio" not in msg
+            ):
                 continue
             if msg["chat"]["id"] != cfg.chat_id:
                 continue
@@ -748,11 +752,11 @@ async def _wait_for_resume(running_task: RunningTask) -> ResumeToken | None:
 
 async def _send_with_resume(
     bot: BotClient,
-    enqueue: Callable[[int, int, str, ResumeToken], Awaitable[None]],
+    enqueue: Callable[[int, int, dict[str, Any], ResumeToken], Awaitable[None]],
     running_task: RunningTask,
     chat_id: int,
     user_msg_id: int,
-    text: str,
+    msg: dict[str, Any],
 ) -> None:
     resume = await _wait_for_resume(running_task)
     if resume is None:
@@ -763,7 +767,7 @@ async def _send_with_resume(
             disable_notification=True,
         )
         return
-    await enqueue(chat_id, user_msg_id, text, resume)
+    await enqueue(chat_id, user_msg_id, msg, resume)
 
 
 async def _send_runner_unavailable(
@@ -805,7 +809,7 @@ async def run_main_loop(
             async def run_job(
                 chat_id: int,
                 user_msg_id: int,
-                text: str,
+                msg: dict[str, Any],
                 resume_token: ResumeToken | None,
                 on_thread_known: Callable[[ResumeToken, anyio.Event], Awaitable[None]]
                 | None = None,
@@ -844,12 +848,15 @@ async def run_main_loop(
                         engine=entry.runner.engine,
                         resume=resume_token.value if resume_token else None,
                     )
+                    prompt = await resolve_user_prompt(msg, cfg=cfg.voice, bot=cfg.bot)
+                    if prompt is None:
+                        return
                     await handle_message(
                         cfg,
                         runner=entry.runner,
                         chat_id=chat_id,
                         user_msg_id=user_msg_id,
-                        text=text,
+                        text=prompt,
                         resume_token=resume_token,
                         strip_resume_line=cfg.router.is_resume_line,
                         running_tasks=running_tasks,
@@ -868,23 +875,29 @@ async def run_main_loop(
                 await run_job(
                     job.chat_id,
                     job.user_msg_id,
-                    job.text,
+                    job.msg,
                     job.resume_token,
                 )
 
             scheduler = ThreadScheduler(task_group=tg, run_job=run_thread_job)
 
             async for msg in poller(cfg):
-                text = msg["text"]
+                msg_for_job = msg
+                text = msg.get("text")
                 user_msg_id = msg["message_id"]
+                engine_override = None
 
-                if _is_cancel_command(text):
-                    tg.start_soon(_handle_cancel, cfg, msg, running_tasks)
-                    continue
+                if isinstance(text, str):
+                    if _is_cancel_command(text):
+                        tg.start_soon(_handle_cancel, cfg, msg, running_tasks)
+                        continue
 
-                text, engine_override = _strip_engine_command(
-                    text, engine_ids=cfg.router.engine_ids
-                )
+                    text, engine_override = _strip_engine_command(
+                        text, engine_ids=cfg.router.engine_ids
+                    )
+                    if msg.get("text") != text:
+                        msg_for_job = dict(msg)
+                        msg_for_job["text"] = text
 
                 r = msg.get("reply_to_message") or {}
                 resume_token = cfg.router.resolve_resume(text, r.get("text"))
@@ -902,7 +915,7 @@ async def run_main_loop(
                             running_task,
                             msg["chat"]["id"],
                             user_msg_id,
-                            text,
+                            msg_for_job,
                         )
                         continue
 
@@ -911,14 +924,14 @@ async def run_main_loop(
                         run_job,
                         msg["chat"]["id"],
                         user_msg_id,
-                        text,
+                        msg_for_job,
                         None,
                         scheduler.note_thread_known,
                         engine_override,
                     )
                 else:
                     await scheduler.enqueue_resume(
-                        msg["chat"]["id"], user_msg_id, text, resume_token
+                        msg["chat"]["id"], user_msg_id, msg_for_job, resume_token
                     )
     finally:
         await cfg.bot.close()

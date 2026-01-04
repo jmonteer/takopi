@@ -819,12 +819,12 @@ async def test_send_with_resume_waits_for_token() -> None:
     from takopi.bridge import RunningTask, _send_with_resume
 
     bot = _FakeBot()
-    sent: list[tuple[int, int, str, ResumeToken | None]] = []
+    sent: list[tuple[int, int, dict, ResumeToken | None]] = []
 
     async def enqueue(
-        chat_id: int, user_msg_id: int, text: str, resume: ResumeToken
+        chat_id: int, user_msg_id: int, msg: dict, resume: ResumeToken
     ) -> None:
-        sent.append((chat_id, user_msg_id, text, resume))
+        sent.append((chat_id, user_msg_id, msg, resume))
 
     running_task = RunningTask()
 
@@ -841,11 +841,11 @@ async def test_send_with_resume_waits_for_token() -> None:
             running_task,
             123,
             10,
-            "hello",
+            {"text": "hello"},
         )
 
     assert sent == [
-        (123, 10, "hello", ResumeToken(engine=CODEX_ENGINE, value="abc123"))
+        (123, 10, {"text": "hello"}, ResumeToken(engine=CODEX_ENGINE, value="abc123"))
     ]
 
 
@@ -854,12 +854,12 @@ async def test_send_with_resume_reports_when_missing() -> None:
     from takopi.bridge import RunningTask, _send_with_resume
 
     bot = _FakeBot()
-    sent: list[tuple[int, int, str, ResumeToken | None]] = []
+    sent: list[tuple[int, int, dict, ResumeToken | None]] = []
 
     async def enqueue(
-        chat_id: int, user_msg_id: int, text: str, resume: ResumeToken
+        chat_id: int, user_msg_id: int, msg: dict, resume: ResumeToken
     ) -> None:
-        sent.append((chat_id, user_msg_id, text, resume))
+        sent.append((chat_id, user_msg_id, msg, resume))
 
     running_task = RunningTask()
     running_task.done.set()
@@ -870,7 +870,7 @@ async def test_send_with_resume_reports_when_missing() -> None:
         running_task,
         123,
         10,
-        "hello",
+        {"text": "hello"},
     )
 
     assert sent == []
@@ -967,5 +967,56 @@ async def test_run_main_loop_routes_reply_to_running_resume() -> None:
             )
         finally:
             hold.set()
+            stop_polling.set()
+            tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_run_main_loop_handles_voice_message(monkeypatch) -> None:
+    from takopi import bridge
+    from takopi.bridge import BridgeConfig, run_main_loop
+
+    resolve_called = anyio.Event()
+    stop_polling = anyio.Event()
+
+    async def fake_resolve(msg, *, cfg, bot) -> str:
+        _ = msg, cfg, bot
+        resolve_called.set()
+        return "transcribed"
+
+    monkeypatch.setattr(bridge, "resolve_user_prompt", fake_resolve)
+
+    bot = _FakeBot()
+    runner = ScriptRunner(
+        [Return(answer="ok")], engine=CODEX_ENGINE, resume_value="abc123"
+    )
+    cfg = BridgeConfig(
+        bot=bot,
+        router=_make_router(runner),
+        voice=DEFAULT_VOICE,
+        chat_id=123,
+        final_notify=True,
+        startup_msg="",
+    )
+
+    async def poller(_cfg: BridgeConfig):
+        yield {
+            "message_id": 1,
+            "voice": {"file_id": "voice123", "duration": 2},
+            "chat": {"id": 123},
+            "from": {"id": 123},
+        }
+        await stop_polling.wait()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(run_main_loop, cfg, poller)
+        try:
+            with anyio.fail_after(2):
+                await resolve_called.wait()
+            with anyio.fail_after(2):
+                while not runner.calls:
+                    await anyio.sleep(0)
+            assert runner.calls[0][0] == "transcribed"
+        finally:
             stop_polling.set()
             tg.cancel_scope.cancel()
