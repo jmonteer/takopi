@@ -1008,15 +1008,22 @@ async def test_run_main_loop_handles_voice_message(monkeypatch) -> None:
         }
         await stop_polling.wait()
 
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(run_main_loop, cfg, poller)
+    done = anyio.Event()
+
+    async def run_loop() -> None:
         try:
-            with anyio.fail_after(2):
-                await resolve_called.wait()
-            with anyio.fail_after(2):
-                while not runner.calls:
-                    await anyio.sleep(0)
-            assert runner.calls[0][0] == "transcribed"
+            await run_main_loop(cfg, poller)
         finally:
-            stop_polling.set()
-            tg.cancel_scope.cancel()
+            done.set()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(run_loop)
+        with anyio.fail_after(2):
+            await resolve_called.wait()
+        with anyio.fail_after(2):
+            while not runner.calls:
+                await anyio.sleep(0)
+        assert runner.calls[0][0] == "transcribed"
+        stop_polling.set()
+        with anyio.fail_after(2):
+            await done.wait()
