@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 
 import anyio
 import pytest
@@ -10,9 +11,11 @@ from takopi.router import AutoRouter, RunnerEntry
 from takopi.runners.codex import CodexRunner
 from takopi.telegram import TelegramClient
 from takopi.runners.mock import Advance, Emit, Raise, Return, ScriptRunner, Sleep, Wait
+from takopi.voice import load_voice_config
 from tests.factories import action_completed, action_started
 
 CODEX_ENGINE = EngineId("codex")
+DEFAULT_VOICE = load_voice_config({}, Path("takopi.toml"))
 
 
 def _make_router(runner) -> AutoRouter:
@@ -338,6 +341,7 @@ async def test_final_notify_sends_loud_final_message() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -366,6 +370,7 @@ async def test_handle_message_strips_resume_line_from_prompt() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -397,6 +402,7 @@ async def test_long_final_message_edits_progress_message() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=False,
         startup_msg="",
@@ -440,6 +446,7 @@ async def test_progress_edits_are_rate_limited() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot, clock=clock),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -483,6 +490,7 @@ async def test_progress_edits_do_not_sleep_again_without_new_events() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot, clock=clock),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -544,6 +552,7 @@ async def test_bridge_flow_sends_progress_edits_and_final_resume() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot, clock=clock),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -577,6 +586,7 @@ async def test_handle_cancel_without_reply_prompts_user() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -599,6 +609,7 @@ async def test_handle_cancel_with_no_progress_message_says_nothing_running() -> 
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -625,6 +636,7 @@ async def test_handle_cancel_with_finished_task_says_nothing_running() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -652,6 +664,7 @@ async def test_handle_cancel_cancels_running_task() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -682,6 +695,7 @@ async def test_handle_cancel_only_cancels_matching_progress_message() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -727,6 +741,7 @@ async def test_handle_message_cancelled_renders_cancelled_state() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -777,6 +792,7 @@ async def test_handle_message_error_preserves_resume_token() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",
@@ -911,6 +927,7 @@ async def test_run_main_loop_routes_reply_to_running_resume() -> None:
     cfg = BridgeConfig(
         bot=_queued_bot(bot),
         router=_make_router(runner),
+        voice=DEFAULT_VOICE,
         chat_id=123,
         final_notify=True,
         startup_msg="",

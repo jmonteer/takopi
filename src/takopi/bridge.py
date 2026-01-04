@@ -22,6 +22,7 @@ from .router import AutoRouter, RunnerUnavailableError
 from .runner import Runner
 from .scheduler import ThreadJob, ThreadScheduler
 from .telegram import BotClient
+from .voice import VoiceConfig
 
 
 logger = get_logger(__name__)
@@ -277,6 +278,7 @@ class ProgressEdits:
 class BridgeConfig:
     bot: BotClient
     router: AutoRouter
+    voice: VoiceConfig
     chat_id: int
     final_notify: bool
     startup_msg: str
