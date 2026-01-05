@@ -18,6 +18,7 @@ from .render import (
     prepare_telegram,
     render_event_cli,
 )
+from .hooks import FinalReplyContext, FinalReplyHook
 from .router import AutoRouter, RunnerUnavailableError
 from .runner import Runner
 from .scheduler import ThreadJob, ThreadScheduler
@@ -277,6 +278,7 @@ class BridgeConfig:
     chat_id: int
     final_notify: bool
     startup_msg: str
+    final_hook: FinalReplyHook | None = None
     progress_edit_every: float = PROGRESS_EDIT_EVERY_S
 
 
@@ -435,7 +437,7 @@ async def send_result_message(
     edit_message_id: int | None,
     prepared: tuple[str, list[dict[str, Any]]] | None = None,
     delete_tag: str = "final",
-) -> None:
+) -> int | None:
     final_msg, edited = await _send_or_edit_markdown(
         cfg.bot,
         chat_id=chat_id,
@@ -446,10 +448,14 @@ async def send_result_message(
         prepared=prepared,
     )
     if final_msg is None:
-        return
+        return None
+    final_message_id = final_msg.get("message_id")
+    if not isinstance(final_message_id, int):
+        final_message_id = None
     if progress_id is not None and (edit_message_id is None or not edited):
         logger.debug("[%s] delete progress message_id=%s", delete_tag, progress_id)
         await cfg.bot.delete_message(chat_id=chat_id, message_id=progress_id)
+    return final_message_id
 
 
 async def handle_message(
@@ -646,7 +652,7 @@ async def handle_message(
             final_entities,
         )
 
-    await send_result_message(
+    final_message_id = await send_result_message(
         cfg,
         chat_id=chat_id,
         user_msg_id=user_msg_id,
@@ -657,6 +663,21 @@ async def handle_message(
         prepared=(final_rendered, final_entities),
         delete_tag="final",
     )
+    if cfg.final_hook is not None:
+        context = FinalReplyContext(
+            bot=cfg.bot,
+            chat_id=chat_id,
+            user_message_id=user_msg_id,
+            final_message_id=final_message_id,
+            answer=final_answer,
+            ok=run_ok,
+            engine=completed.engine,
+            elapsed_s=elapsed,
+        )
+        try:
+            await cfg.final_hook(context)
+        except Exception:
+            logger.exception("[final_hook] failed")
 
 
 async def poll_updates(cfg: BridgeConfig) -> AsyncIterator[dict[str, Any]]:
