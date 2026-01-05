@@ -69,6 +69,17 @@ use_api_billing = false
 [pi]
 model = "gpt-4.1"
 provider = "openai"
+
+[voice_reply]
+enabled = false
+# command can be a list or a shell string; {text} is summary input, {out} is .ogg output
+command = ["sh", "-lc", "piper --model $HOME/.local/share/piper/en_US-hfc_female-medium.onnx --output_file {out}.wav --input_file {text} && ffmpeg -y -i {out}.wav -c:a libopus -b:a 24k {out} && rm -f {out}.wav"]
+max_seconds = 30
+wpm = 150
+timeout_s = 20
+max_bullets = 5
+reply_to_final = true
+high_level = true
 ```
 
 ## usage

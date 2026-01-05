@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -29,6 +30,14 @@ class BotClient(Protocol):
         disable_notification: bool | None = False,
         entities: list[dict] | None = None,
         parse_mode: str | None = None,
+    ) -> dict | None: ...
+
+    async def send_voice(
+        self,
+        chat_id: int,
+        voice_path: Path,
+        reply_to_message_id: int | None = None,
+        disable_notification: bool | None = False,
     ) -> dict | None: ...
 
     async def edit_message_text(
@@ -130,6 +139,73 @@ class TelegramClient:
         logger.debug("[telegram] response %s: %s", method, payload)
         return payload.get("result")
 
+    async def _post_multipart(
+        self,
+        method: str,
+        data: dict[str, Any],
+        files: dict[str, Any],
+    ) -> Any | None:
+        logger.debug("[telegram] request %s: %s", method, data)
+        try:
+            resp = await self._client.post(
+                f"{self._base}/{method}", data=data, files=files
+            )
+        except httpx.HTTPError as e:
+            url = getattr(e.request, "url", None)
+            logger.error(
+                "[telegram] network error method=%s url=%s: %s", method, url, e
+            )
+            return None
+
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            body = resp.text
+            logger.error(
+                "[telegram] http error method=%s status=%s url=%s: %s body=%r",
+                method,
+                resp.status_code,
+                resp.request.url,
+                e,
+                body,
+            )
+            return None
+
+        try:
+            payload = resp.json()
+        except Exception as e:
+            body = resp.text
+            logger.error(
+                "[telegram] bad response method=%s status=%s url=%s: %s body=%r",
+                method,
+                resp.status_code,
+                resp.request.url,
+                e,
+                body,
+            )
+            return None
+
+        if not isinstance(payload, dict):
+            logger.error(
+                "[telegram] invalid response method=%s url=%s: %r",
+                method,
+                resp.request.url,
+                payload,
+            )
+            return None
+
+        if not payload.get("ok"):
+            logger.error(
+                "[telegram] api error method=%s url=%s: %s",
+                method,
+                resp.request.url,
+                payload,
+            )
+            return None
+
+        logger.debug("[telegram] response %s: %s", method, payload)
+        return payload.get("result")
+
     async def get_updates(
         self,
         offset: int | None,
@@ -165,6 +241,22 @@ class TelegramClient:
         if parse_mode is not None:
             params["parse_mode"] = parse_mode
         return await self._post("sendMessage", params)  # type: ignore[return-value]
+
+    async def send_voice(
+        self,
+        chat_id: int,
+        voice_path: Path,
+        reply_to_message_id: int | None = None,
+        disable_notification: bool | None = False,
+    ) -> dict | None:
+        params: dict[str, Any] = {"chat_id": chat_id}
+        if disable_notification is not None:
+            params["disable_notification"] = disable_notification
+        if reply_to_message_id is not None:
+            params["reply_to_message_id"] = reply_to_message_id
+        with voice_path.open("rb") as handle:
+            files = {"voice": (voice_path.name, handle, "audio/ogg")}
+            return await self._post_multipart("sendVoice", params, files)  # type: ignore[return-value]
 
     async def edit_message_text(
         self,

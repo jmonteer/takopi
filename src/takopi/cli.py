@@ -20,6 +20,7 @@ from .logging import setup_logging
 from .onboarding import SetupResult, check_setup, interactive_setup
 from .router import AutoRouter, RunnerEntry
 from .telegram import TelegramClient
+from .voice_reply import build_voice_reply_hook, load_voice_reply_config
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,8 @@ def _parse_bridge_config(
     )
 
     bot = TelegramClient(token)
+    voice_reply = load_voice_reply_config(config, config_path)
+    final_hook = build_voice_reply_hook(voice_reply) if voice_reply else None
 
     return BridgeConfig(
         bot=bot,
@@ -221,6 +224,7 @@ def _parse_bridge_config(
         chat_id=chat_id,
         final_notify=final_notify,
         startup_msg=startup_msg,
+        final_hook=final_hook,
     )
 
 
