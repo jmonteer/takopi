@@ -85,7 +85,7 @@ async def test_resolve_user_prompt_voice_success(monkeypatch) -> None:
     assert bot.send_calls[0]["reply_to_message_id"] == 10
     assert bot.edit_calls
     assert bot.edit_calls[0]["message_id"] == bot.send_calls[0]["message_id"]
-    assert bot.edit_calls[0]["entities"]
+    assert bot.edit_calls[0]["entities"] == []
 
 
 @pytest.mark.anyio

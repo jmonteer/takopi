@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import logging
 import subprocess
 import tempfile
 import time
@@ -11,6 +10,7 @@ from typing import Any, Literal
 import anyio
 
 from .config import ConfigError
+from .logging import get_logger
 from .telegram import BotClient
 from .utils.subprocess import manage_subprocess
 
@@ -23,7 +23,7 @@ TRANSCRIPT_HEADER = "Transcript:"
 TRANSCRIPT_TRUNCATION_SUFFIX = "..."
 FFMPEG_TIMEOUT_SEC = 30
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +184,10 @@ async def transcribe_voice_input(
         transcribe_elapsed = time.monotonic() - transcribe_start
 
     logger.debug(
-        "[voice] download=%.2fs ffmpeg=%.2fs transcribe=%.2fs",
-        download_elapsed,
-        ffmpeg_elapsed,
-        transcribe_elapsed,
+        "voice.transcribe.timing",
+        download_s=round(download_elapsed, 2),
+        ffmpeg_s=round(ffmpeg_elapsed, 2),
+        transcribe_s=round(transcribe_elapsed, 2),
     )
 
     transcript = _normalize_transcript(transcript)
@@ -430,9 +430,9 @@ async def _run_ffmpeg(input_path: Path, output_path: Path) -> None:
         raise VoiceError("could not decode audio") from exc
     if rc != 0 or not output_path.exists() or output_path.stat().st_size == 0:
         logger.debug(
-            "[voice] ffmpeg failed rc=%s stderr=%s",
-            rc,
-            stderr.decode("utf-8", errors="replace"),
+            "voice.ffmpeg.failed",
+            rc=rc,
+            stderr=stderr.decode("utf-8", errors="replace"),
         )
         raise VoiceError("could not decode audio")
 
@@ -451,9 +451,9 @@ async def _run_transcribe_cmd(wav_path: Path, cfg: VoiceConfig) -> str:
         raise VoiceError("transcription failed") from exc
     if rc != 0:
         logger.debug(
-            "[voice] transcribe failed rc=%s stderr=%s",
-            rc,
-            stderr.decode("utf-8", errors="replace"),
+            "voice.transcribe.failed",
+            rc=rc,
+            stderr=stderr.decode("utf-8", errors="replace"),
         )
         raise VoiceError("transcription failed")
     text = stdout.decode("utf-8", errors="replace")
@@ -488,8 +488,6 @@ async def _read_stream(stream: anyio.abc.ByteReceiveStream, buf: bytearray) -> N
         except anyio.EndOfStream:
             return
         buf.extend(chunk)
-
-
 
 
 def _optional_bool(
