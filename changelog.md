@@ -1,5 +1,11 @@
 # changelog
 
+## Unreleased
+
+### changes
+
+- add voice note and audio transcription input with spoiler transcripts
+
 ## v0.8.0 (2026-01-05)
 
 ### changes

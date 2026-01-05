@@ -44,6 +44,10 @@ class BotClient(Protocol):
         allowed_updates: list[str] | None = None,
     ) -> list[dict] | None: ...
 
+    async def get_file(self, file_id: str) -> dict | None: ...
+
+    async def download_file(self, file_path: str) -> bytes | None: ...
+
     async def send_message(
         self,
         chat_id: int,
@@ -277,6 +281,7 @@ class TelegramClient:
                 raise ValueError("Provide either token or client, not both.")
             self._client_override = client
             self._base = None
+            self._file_base = None
             self._http_client = None
             self._owns_http_client = False
         else:
@@ -284,6 +289,7 @@ class TelegramClient:
                 raise ValueError("Telegram token is empty")
             self._client_override = None
             self._base = f"https://api.telegram.org/bot{token}"
+            self._file_base = f"https://api.telegram.org/file/bot{token}"
             self._http_client = http_client or httpx.AsyncClient(timeout=timeout_s)
             self._owns_http_client = http_client is None
         self._clock = clock
@@ -300,7 +306,6 @@ class TelegramClient:
             on_outbox_error=self.log_outbox_failure,
         )
         self._seq = itertools.count()
-
     def interval_for_chat(self, chat_id: int | None) -> float:
         if chat_id is None:
             return self._private_interval
@@ -476,6 +481,50 @@ class TelegramClient:
                 return result if isinstance(result, list) else None
             except TelegramRetryAfter as exc:
                 await self._sleep(exc.retry_after)
+
+    async def get_file(self, file_id: str) -> dict | None:
+        if self._client_override is not None:
+            return await self._client_override.get_file(file_id)
+        res = await self._post("getFile", {"file_id": file_id})
+        return res if isinstance(res, dict) else None
+
+    async def download_file(self, file_path: str) -> bytes | None:
+        if not file_path:
+            return None
+        if self._client_override is not None:
+            return await self._client_override.download_file(file_path)
+        if self._http_client is None or self._file_base is None:
+            raise RuntimeError("TelegramClient is configured without an HTTP client.")
+        url = f"{self._file_base}/{file_path}"
+        try:
+            resp = await self._http_client.get(url)
+        except httpx.HTTPError as exc:
+            req_url = getattr(exc.request, "url", None)
+            logger.error(
+                "telegram.download.network_error",
+                file_path=file_path,
+                url=str(req_url) if req_url is not None else None,
+                error=str(exc),
+                error_type=exc.__class__.__name__,
+            )
+            return None
+
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = resp.text
+            logger.error(
+                "telegram.download.http_error",
+                file_path=file_path,
+                status=resp.status_code,
+                url=str(resp.request.url),
+                error=str(exc),
+                error_type=exc.__class__.__name__,
+                body=body,
+            )
+            return None
+
+        return resp.content
 
     async def send_message(
         self,

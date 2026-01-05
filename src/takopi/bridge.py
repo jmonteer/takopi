@@ -22,6 +22,7 @@ from .router import AutoRouter, RunnerUnavailableError
 from .runner import Runner
 from .scheduler import ThreadJob, ThreadScheduler
 from .telegram import BotClient
+from .plugins.voice import VoiceConfig, resolve_user_prompt
 
 
 logger = get_logger(__name__)
@@ -277,6 +278,7 @@ class ProgressEdits:
 class BridgeConfig:
     bot: BotClient
     router: AutoRouter
+    voice: VoiceConfig
     chat_id: int
     final_notify: bool
     startup_msg: str
@@ -671,7 +673,11 @@ async def poll_updates(cfg: BridgeConfig) -> AsyncIterator[dict[str, Any]]:
         for upd in updates:
             offset = upd["update_id"] + 1
             msg = upd["message"]
-            if "text" not in msg:
+            if (
+                "text" not in msg
+                and "voice" not in msg
+                and "audio" not in msg
+            ):
                 continue
             if msg["chat"]["id"] != cfg.chat_id:
                 continue
@@ -842,6 +848,9 @@ async def run_main_loop(
                         engine=entry.runner.engine,
                         resume=resume_token.value if resume_token else None,
                     )
+                    prompt = await resolve_user_prompt(msg, cfg=cfg.voice, bot=cfg.bot)
+                    if prompt is None:
+                        return
                     await handle_message(
                         cfg,
                         runner=entry.runner,
@@ -873,7 +882,12 @@ async def run_main_loop(
             scheduler = ThreadScheduler(task_group=tg, run_job=run_thread_job)
 
             async for msg in poller(cfg):
-                text = msg["text"]
+                # TODO: Voice transcription happens before queueing, so voice notes
+                # may be processed out of order relative to the per-thread queue.
+                prompt = await resolve_user_prompt(msg, cfg=cfg.voice, bot=cfg.bot)
+                if prompt is None:
+                    continue
+                text = prompt
                 user_msg_id = msg["message_id"]
 
                 if _is_cancel_command(text):

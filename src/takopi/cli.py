@@ -19,6 +19,7 @@ from .logging import get_logger, setup_logging
 from .onboarding import SetupResult, check_setup, interactive_setup
 from .router import AutoRouter, RunnerEntry
 from .telegram import TelegramClient
+from .plugins.voice import interactive_voice_setup, load_voice_config
 
 logger = get_logger(__name__)
 
@@ -200,6 +201,7 @@ def _parse_bridge_config(
         backends=backends,
         default_engine=default_engine,
     )
+    voice = load_voice_config(config, config_path)
     available_engines = [entry.engine for entry in router.available_entries]
     missing_engines = [entry.engine for entry in router.entries if not entry.available]
     engine_list = ", ".join(available_engines) if available_engines else "none"
@@ -217,6 +219,7 @@ def _parse_bridge_config(
     return BridgeConfig(
         bot=bot,
         router=router,
+        voice=voice,
         chat_id=chat_id,
         final_notify=final_notify,
         startup_msg=startup_msg,
@@ -348,6 +351,22 @@ def app_main(
             onboard=onboard,
         )
         raise typer.Exit()
+
+
+@app.command("voice-onboard")
+def voice_onboard(
+    force: bool = typer.Option(
+        False,
+        "--force/--no-force",
+        help="Overwrite any existing [voice] config.",
+    ),
+) -> None:
+    """Run the voice notes setup wizard."""
+    if not _should_run_interactive():
+        typer.echo("error: voice-onboard requires a TTY", err=True)
+        raise typer.Exit(code=1)
+    if not interactive_voice_setup(force=force):
+        raise typer.Exit(code=1)
 
 
 def make_engine_cmd(engine_id: str) -> Callable[..., None]:
